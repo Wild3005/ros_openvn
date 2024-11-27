@@ -14,9 +14,9 @@ using namespace std;
 
 const float SCORE_THRESHOLD = 0.2;
 const float NMS_THRESHOLD = 0.4;
-const float CONFIDENCE_THRESHOLD = 0.4;
+const float CONFIDENCE_THRESHOLD = 0.5;
 
-cv::VideoCapture cap(2);
+cv::VideoCapture cap(0);
 
 class Detect : public rclcpp::Node
 {
@@ -81,6 +81,7 @@ Detect(): Node("camera"){
 }
 
 private:
+double fps = 0;
 
 Resize resize_and_pad(cv::Mat& img, cv::Size new_shape) {
     float width = img.cols;
@@ -104,15 +105,22 @@ void detect_callback(){
         // Resize res = resize_and_pad(img, cv::Size(640, 640));
         Resize res;
         cap.read(this -> img);
+        if (img.empty()) {
+            RCLCPP_WARN(this->get_logger(), "Empty frame captured.");
+            return;
+        }
 
         res = resize_and_pad(img, cv::Size(640, 640));
+        auto start_time = std::chrono::high_resolution_clock::now();
 
-        cv::waitKey(1);
+        cv::waitKey(10);
 
         // Step 5. Create tensor from image
         float *input_data = (float *) res.resized_image.data;
         ov::Tensor input_tensor = ov::Tensor(compiled_model.input().get_element_type(), compiled_model.input().get_shape(), input_data);
         infer_request.set_input_tensor(input_tensor);
+        
+        
         infer_request.infer();
 
         //Step 7. Retrieve inference results 
@@ -196,6 +204,13 @@ void detect_callback(){
             cv::rectangle(img, cv::Point(box.x, box.y - 20), cv::Point(xmax, box.y), cv::Scalar(0, 255, 0), cv::FILLED);
             cv::putText(img, std::to_string(classId), cv::Point(box.x, box.y - 5), cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(0, 0, 0));
         }
+
+        auto end_time = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> elapsed = end_time - start_time;
+        fps = 1.0 / elapsed.count(); // Accurate frame rate calculation
+        RCLCPP_INFO(this->get_logger(), "FPS: %.2f", fps);
+        cv::putText(img, "FPS:" + to_string(fps),cv::Point(10,30),cv::FONT_HERSHEY_SIMPLEX,1.0,cv::Scalar(0,0,0),2);
+        RCLCPP_INFO(this->get_logger(), "FPS: %f", fps);
 
         obj_pub->publish(this->info_obj);
 
